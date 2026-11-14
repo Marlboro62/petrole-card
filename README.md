@@ -39,9 +39,6 @@ Les bidons s'achètent au gré des prix et des magasins : le bouton **« + Achat
 chaque achat (nombre de bidons, prix par bidon, magasin, date) et remonte la réserve. Chaque bidon
 entamé reprend le prix et le magasin de son achat, les plus anciens d'abord.
 
-> **Pré-version 0.1.0-beta.4** : les retours sont les bienvenus dans les
-> [issues GitHub](https://github.com/Marlboro62/petrole-card/issues).
-
 ![Carte Pétrole, données simulées](images/carte-demo.png)
 
 **[Voir la démo en ligne](https://marlboro62.github.io/petrole-card/docs/demo.html)** (bidons simulés).
