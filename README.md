@@ -33,10 +33,13 @@ type PTX) : bidon en service, pétrole restant estimé, durée moyenne d'un bido
 consommation, coût, réserve de bidons et dépense de la saison de chauffe.
 
 À chaque bidon entamé, on bipe le tag NFC collé sur le poêle avec son téléphone. Le bidon est noté
-dans le calendrier avec sa contenance et son prix, un bidon est retiré de la réserve, et la carte
-fait le reste.
+dans le calendrier, un bidon est retiré de la réserve, et la carte fait le reste.
 
-> **Pré-version 0.1.0-beta.3** : les retours sont les bienvenus dans les
+Les bidons s'achètent au gré des prix et des magasins : le bouton **« + Achat »** de la carte note
+chaque achat (nombre de bidons, prix par bidon, magasin, date) et remonte la réserve. Chaque bidon
+entamé reprend le prix et le magasin de son achat, les plus anciens d'abord.
+
+> **Pré-version 0.1.0-beta.4** : les retours sont les bienvenus dans les
 > [issues GitHub](https://github.com/Marlboro62/petrole-card/issues).
 
 ![Carte Pétrole, données simulées](images/carte-demo.png)
@@ -101,7 +104,9 @@ label: PTX 2000 · 20 L
 | Option | Défaut | Rôle |
 | --- | --- | --- |
 | `calendar` | `calendar.home` | calendrier où chaque bidon est noté |
-| `summary` | `Bidon pétrole` | titre des événements lus dans ce calendrier |
+| `summary` | `Bidon pétrole` | titre des événements des bidons entamés |
+| `purchase_summary` | `Achat pétrole` | titre des événements des achats |
+| `purchases` | `3` | derniers achats listés |
 | `title` | `Pétrole` | titre de la carte |
 | `label` | — | texte sous le titre (le combustible, par exemple) |
 | `capacity` | `20` | contenance d'un bidon en litres, si l'événement ne la donne pas (nombre ou entité) |
@@ -127,10 +132,27 @@ Toutes ces options sont aussi dans l'éditeur visuel.
 - **Réserve** : bidons d'avance, et jusqu'à quand ils devraient durer. La tuile passe en rouge
   quand il reste un bidon ou moins.
 - **Cette saison** : bidons, litres et dépense depuis le début de la saison de chauffe.
-- **Derniers bidons**, avec leur durée et leur prix.
+- **Derniers bidons**, avec leur durée, leur prix et leur magasin.
+- **Derniers achats**, prix moyen d'un bidon et magasin le moins cher.
 
 Les estimations apparaissent à partir du deuxième bidon : il faut un bidon terminé pour connaître
 sa durée.
+
+### Noter un achat
+
+Touchez **« + Achat »** en haut de la carte :
+
+- **Bidons achetés** et **prix par bidon** (le prix du dernier achat est proposé) ;
+- **magasin** (les magasins déjà notés sont proposés) ;
+- **date de l'achat** (aujourd'hui par défaut ; un achat passé peut être noté après coup) ;
+- **réserve après l'achat** : calculée (réserve actuelle + bidons achetés), à corriger si besoin.
+  La réserve compte les bidons pleins d'avance, pas celui en service.
+
+« Noter l'achat » ajoute un événement « Achat pétrole » au calendrier, met la réserve à jour et
+garde le prix pour le prochain bip. Pas besoin d'être administrateur.
+
+La section **Derniers achats** liste les achats, avec le prix moyen d'un bidon sur un an et le
+magasin le moins cher en moyenne.
 
 ### Format des événements
 
@@ -138,6 +160,11 @@ L'automatisation note chaque bidon dans le calendrier :
 
 - titre : `Bidon pétrole` ;
 - description : `20 L · 32.9 €` (contenance, puis prix s'il est renseigné).
+
+Chaque achat noté par « + Achat » :
+
+- titre : `Achat pétrole` ;
+- description : `3 × 35.95 € · Auchan` (nombre de bidons, prix par bidon, magasin).
 
 Un bidon ajouté à la main dans le calendrier, avec le même titre, compte aussi. Sans contenance ni
 prix dans la description, la carte prend les options `capacity` et `price`.

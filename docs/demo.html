@@ -116,6 +116,18 @@
     durations.forEach((n, i) => { d += n; out.push(ev(d, prices[Math.min(i + 1, prices.length - 1)])); });
     return out;
   };
+  // achats fictifs : « Achat pétrole », bidons par magasin et prix par bidon
+  const buy = (daysAgo, qty, price, store) => ({
+    summary: "Achat pétrole",
+    description: `${qty} × ${price} € · ${store}`,
+    start: { dateTime: new Date(Date.now() - daysAgo * JOUR).toISOString() },
+  });
+  const BUYS = {
+    winter: [buy(80, 3, 31.5, "Leclerc"), buy(45, 4, 32.9, "Intermarché"), buy(12, 3, 35.95, "Auchan")],
+    low: [buy(40, 5, 32.9, "Leclerc")],
+    first: [buy(3, 3, 35.95, "Auchan")],
+    empty: [],
+  };
   const SCENARIOS = {
     winter: () => chain([7.5, 8, 9, 11, 14, 18], 3.2, [32.9, 32.9, 31.5, 31.5]),
     low: () => chain([7, 7.5, 8, 8.5], 7.1, [32.9]),
@@ -132,7 +144,7 @@
     frame.className = `frame ${state.screen}`;
     const config = { calendar: "calendar.home", label: "PTX 2000 · 20 L", theme: state.theme, ...(state.stock === "" ? { stock: "" } : {}) };
     document.getElementById("yaml").textContent = ["type: custom:petrole-card", ...Object.entries(config).map(([k, v]) => `${k}: ${v === "" ? '""' : v}`)].join("\n");
-    const events = SCENARIOS[state.scenario]();
+    const events = [...SCENARIOS[state.scenario](), ...BUYS[state.scenario]];
     card?.remove();
     card = document.createElement("petrole-card");
     frame.appendChild(card);
@@ -145,6 +157,12 @@
         ...(state.stock === "" ? {} : { "input_number.petrole_bidons_en_reserve": { entity_id: "input_number.petrole_bidons_en_reserve", state: state.stock, attributes: {} } }),
       },
       callApi: async () => events,
+      // démo : le formulaire « + Achat » note l'achat sans Home Assistant
+      callService: async (domain, service, data) => {
+        if (domain === "calendar") BUYS[state.scenario].push({ summary: data.summary, description: data.description, start: { dateTime: new Date(data.start_date_time.replace(" ", "T")).toISOString() } });
+        if (domain === "input_number" && data.entity_id.endsWith("reserve")) state.stock = String(data.value);
+        setTimeout(render, 50);
+      },
     };
   }
 

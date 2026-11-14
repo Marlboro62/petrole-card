@@ -7,12 +7,14 @@
  * Elle lit les événements « Bidon pétrole » d'un calendrier Home Assistant, écrits à chaque nouveau
  * bidon par l'automatisation du tag NFC (créée depuis l'éditeur de la carte, ou packages/petrole.yaml) :
  *   description « 20 L · 32.9 € »
+ * Les achats de bidons sont notés « Achat pétrole » par le bouton « + Achat » de la carte :
+ *   description « 3 × 35.95 € · Auchan »
  *
  * type: custom:petrole-card
  * calendar: calendar.home
  */
 
-const CARD_VERSION = "0.1.0-beta.3";
+const CARD_VERSION = "0.1.0-beta.4";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -58,6 +60,8 @@ const PETROLE_DEFAULTS = {
   title: "Pétrole",
   calendar: "calendar.home",
   summary: "Bidon pétrole",
+  purchase_summary: "Achat pétrole",
+  purchases: 3,
   capacity: 20,
   price: "input_number.petrole_prix_du_bidon",
   stock: "input_number.petrole_bidons_en_reserve",
@@ -97,22 +101,64 @@ const PETROLE = {
     return { start, litres: get(/([\d.]+)\s*L\b/), price: get(/([\d.]+)\s*€/) };
   },
 
+  /** Un achat à partir d'un événement « Achat pétrole » (« 3 × 35.95 € · Auchan »), ou null. */
+  parsePurchase(ev, summary) {
+    if (String(ev.summary || "").trim().toLowerCase() !== String(summary || "").trim().toLowerCase()) return null;
+    const date = new Date(ev.start?.dateTime || ev.start?.date || ev.start);
+    if (Number.isNaN(date.getTime())) return null;
+    const raw = String(ev.description || "");
+    const d = raw.replace(/,/g, ".");
+    const qty = Number((/(\d+)\s*[×x*]/i.exec(d) || [])[1] || 1);
+    const price = Number((/([\d.]+)\s*€/.exec(d) || [])[1]);
+    const parts = raw.split("·");
+    const store = parts.length > 1 ? parts[parts.length - 1].trim() : "";
+    if (!Number.isFinite(price) || price <= 0 || !(qty > 0)) return null;
+    return { date, qty, price, store };
+  },
+
   /** Bidons du plus récent au plus ancien : durée de chaque bidon jusqu'au suivant, le dernier est en service.
-   *  Deux bips à moins d'une heure d'écart ne comptent qu'une fois. */
-  bidons(events, capacity, price, now) {
+   *  Deux bips à moins d'une heure d'écart ne comptent qu'une fois. Chaque bidon prend le prix et le magasin
+   *  de son achat, les plus anciens d'abord (un achat noté le jour même du bip compte encore). */
+  bidons(events, capacity, price, now, purchases = []) {
     const list = [...events].sort((a, b) => a.start - b.start)
       .filter((b, i, arr) => i === 0 || b.start - arr[i - 1].start > 3600000);
+    const lots = [...purchases].sort((a, b) => a.date - b.date).map((p) => ({ ...p, left: p.qty }));
+    const lotOf = list.map((b) => {
+      const lot = lots.find((l) => l.left > 0 && l.date.getTime() <= b.start.getTime() + DAY);
+      if (lot) lot.left -= 1;
+      return lot || null;
+    });
     return list.map((b, i) => {
       const end = list[i + 1]?.start || null;
+      const lot = lotOf[i];
       return {
         ...b,
         litres: b.litres ?? capacity,
-        price: b.price ?? price,
+        price: lot ? lot.price : b.price ?? price,
+        store: lot ? lot.store : "",
         end,
         days: Math.max(0, ((end || now) - b.start) / DAY),
         current: !end,
       };
     }).reverse();
+  },
+
+  /** Achats : les plus récents, prix moyen par bidon sur un an et magasin le moins cher (prix moyen par magasin). */
+  purchaseStats(purchases, now) {
+    const list = [...purchases].sort((a, b) => b.date - a.date);
+    const year = list.filter((p) => now - p.date <= 365 * DAY);
+    const qty = year.reduce((s, p) => s + p.qty, 0);
+    const avg = qty ? year.reduce((s, p) => s + p.qty * p.price, 0) / qty : null;
+    const byStore = {};
+    for (const p of year) {
+      if (!p.store) continue;
+      const k = p.store.toLowerCase();
+      byStore[k] ||= { store: p.store, qty: 0, cost: 0 };
+      byStore[k].qty += p.qty;
+      byStore[k].cost += p.qty * p.price;
+    }
+    const stores = Object.values(byStore).map((x) => ({ ...x, avg: x.cost / x.qty })).sort((a, b) => a.avg - b.avg);
+    return { list, avg, best: stores.length > 1 ? stores[0] : null, stores };
   },
 
   /** Début de la saison de chauffe en cours (1er du mois choisi, septembre par défaut). */
@@ -168,8 +214,10 @@ class PetroleCard extends HTMLElement {
     this._config = { ...PETROLE_DEFAULTS, ...config };
     this._sig = null;
     this._events = null;
+    this._purchases = [];
     this._fetched = 0;
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    if (!this._wired) this._wire();
     this._render(true);
   }
 
@@ -194,7 +242,9 @@ class PetroleCard extends HTMLElement {
     try {
       const end = new Date(Date.now() + DAY), start = new Date(end.getTime() - 4 * 365 * DAY);
       const events = await this._hass.callApi("GET", `calendars/${c.calendar}?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`);
-      this._events = (Array.isArray(events) ? events : []).map((e) => PETROLE.parse(e, c.summary)).filter(Boolean);
+      const all = Array.isArray(events) ? events : [];
+      this._events = all.map((e) => PETROLE.parse(e, c.summary)).filter(Boolean);
+      this._purchases = all.map((e) => PETROLE.parsePurchase(e, c.purchase_summary)).filter(Boolean);
       this._calError = null;
     } catch (err) {
       this._events = [];
@@ -217,7 +267,8 @@ class PetroleCard extends HTMLElement {
     const c = this._config, hass = this._hass;
     const ids = [c.price, c.stock, c.capacity].filter((x) => typeof x === "string" && x.includes("."));
     const sig = `${c.theme}|${hass.themes?.darkMode}|${ids.map((id) => hass.states?.[id]?.state ?? "-").join("|")}|${this._fetched}|${Math.floor(Date.now() / 3600000)}`;
-    if (!force && sig === this._sig) return;
+    // formulaire d'achat ouvert : pas de redessin pendant la saisie
+    if (!force && (sig === this._sig || this._buy)) return;
     this._sig = sig;
     const theme = themeClass(c.theme, hass);
     const fs = Math.min(150, Math.max(70, Number(c.font_size) || 100)) / 100;
@@ -236,9 +287,12 @@ class PetroleCard extends HTMLElement {
     const price = PETROLE.value(hass, c.price);
     const stockSt = typeof c.stock === "string" && c.stock.includes(".") ? hass.states?.[c.stock] : null;
     const stock = typeof c.stock === "number" ? c.stock : stockSt ? PETROLE.num(stockSt.state) : null;
-    const bidons = PETROLE.bidons(this._events, capacity, price, now);
+    const bidons = PETROLE.bidons(this._events, capacity, price, now, this._purchases);
+    const buys = PETROLE.purchaseStats(this._purchases, now);
+    this._stock = stock;
+    this._lastPrice = buys.list[0]?.price ?? price;
     if (!bidons.length) {
-      this.shadowRoot.innerHTML = `${open}${this._header(null)}<div class="empty">
+      this.shadowRoot.innerHTML = `${open}${this._header(null)}${this._buyForm()}<div class="empty">
         <strong>Aucun bidon noté pour l'instant</strong>
         <span>Bipez le tag NFC du poêle quand vous entamez un bidon : il est noté « ${esc(c.summary)} » dans
         ${esc(hass.states[c.calendar].attributes?.friendly_name || c.calendar)}. L'installation du tag se fait dans l'éditeur de la carte.</span>
@@ -247,14 +301,16 @@ class PetroleCard extends HTMLElement {
     }
     const m = PETROLE.stats(bidons, { capacity, price, stock, average_over: c.average_over, seasonStart: PETROLE.seasonStart(now, c.season_start) }, now);
     m.bidons = bidons;
-    this.shadowRoot.innerHTML = `${open}${this._header(m.current)}${this._hero(m)}${this._tiles(m)}${this._history(m)}${this._footer(m)}</ha-card>`;
+    m.buys = buys;
+    this.shadowRoot.innerHTML = `${open}${this._header(m.current)}${this._buyForm()}${this._hero(m)}${this._tiles(m)}${this._history(m)}${this._purchasesHtml(m)}${this._footer(m)}</ha-card>`;
   }
 
   _header(current) {
     const c = this._config;
     const sub = [c.label, current ? `bidon entamé le ${dateFr(current.start, true)}` : ""].filter(Boolean).join(" · ");
     return `<header><div class="brand">${JERRICAN_ICON}
-      <div><div class="title">${esc(c.title || PETROLE_DEFAULTS.title)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ""}</div></div></header>`;
+      <div><div class="title">${esc(c.title || PETROLE_DEFAULTS.title)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ""}</div></div>
+      <button type="button" class="buy-btn${this._buy ? " on" : ""}" data-act="buy" aria-expanded="${!!this._buy}">+ Achat</button></header>`;
   }
 
   _hero(m) {
@@ -292,7 +348,7 @@ class PetroleCard extends HTMLElement {
       tile("Fin estimée", m.end ? esc(dateFr(m.end)) : "—", "", [m.end ? (m.left > 0 ? `dans ${daysNum(m.left)} ${daysUnit(m.left)}` : "dépassée : bidon à changer ?") : later]),
       tile("Consommation", m.perDay !== null ? fmt(m.perDay, 2) : "—", m.perDay !== null ? "L/jour" : "", [m.perDay !== null ? `≈ ${fmt(m.perDay * 30.44, 0)} L par mois` : later]),
       m.perMonth !== null
-        ? tile("Coût", euro(m.perMonth), "/mois", [`${euro(m.price)} le bidon`, `soit ${euro(m.price / m.litres)} le litre`])
+        ? tile("Coût", euro(m.perMonth), "/mois", [`${euro(m.price)} le bidon${m.current?.store ? ` (${esc(m.current.store)})` : ""}`, `soit ${euro(m.price / m.litres)} le litre`])
         : tile("Bidon", m.price !== null ? euro(m.price) : "—", "", [m.price !== null ? "coût par mois connu au prochain bidon" : "prix non renseigné"]),
     ];
     if (m.stock !== null) {
@@ -307,9 +363,134 @@ class PetroleCard extends HTMLElement {
   _history(m) {
     const n = Math.max(1, Number(this._config.history) || 5);
     const rows = m.bidons.slice(0, n).map((b) => `<div class="row">
-      <span>${esc(dateFr(b.start))} → ${b.current ? "en service" : esc(dateFr(b.end))}${b.price !== null ? ` · ${euro(b.price)}` : ""}</span>
+      <span>${esc(dateFr(b.start))} → ${b.current ? "en service" : esc(dateFr(b.end))}${b.price !== null ? ` · ${euro(b.price)}` : ""}${b.store ? ` · ${esc(b.store)}` : ""}</span>
       <b class="${b.current ? "now" : ""}">${b.days < 1 ? `${span(b.days).v} h` : `${fmt(b.days, b.days < 10 ? 1 : 0)} j`}</b></div>`).join("");
     return `<section class="rows"><div class="rows-h">Derniers bidons</div>${rows}${this._calError ? `<div class="err">Calendrier illisible : ${esc(this._calError)}</div>` : ""}</section>`;
+  }
+
+  _purchasesHtml(m) {
+    const b = m.buys;
+    if (!b.list.length) return "";
+    const n = Math.max(1, Number(this._config.purchases) || 3);
+    const rows = b.list.slice(0, n).map((p) => `<div class="row">
+      <span>${esc(dateFr(p.date))}${p.store ? ` · ${esc(p.store)}` : ""}</span><b>${p.qty} × ${euro(p.price)}</b></div>`).join("");
+    const sum = [
+      b.avg !== null ? `prix moyen ${euro(b.avg)} le bidon sur un an` : "",
+      b.best ? `le moins cher : ${esc(b.best.store)} (${euro(b.best.avg)} en moyenne)` : "",
+    ].filter(Boolean).join(" · ");
+    return `<section class="rows"><div class="rows-h">Derniers achats</div>${rows}${sum ? `<div class="rows-n">${sum}</div>` : ""}</section>`;
+  }
+
+  /** Formulaire « + Achat » : bidons achetés, prix par bidon, magasin, date, et réserve après l'achat. */
+  _buyForm() {
+    const v = this._buy;
+    if (!v) return "";
+    const stores = [...new Set((this._purchases || []).slice().sort((a, b) => b.date - a.date).map((p) => p.store).filter(Boolean))];
+    const stock = this._stockEntity();
+    return `<form class="buy">
+      <div class="buy-g">
+        <label>Bidons achetés<input name="qty" type="number" min="1" max="50" step="1" inputmode="numeric" value="${esc(v.qty)}" required></label>
+        <label>Prix par bidon (€)<input name="price" type="text" inputmode="decimal" value="${esc(v.price)}" required></label>
+        <label>Magasin<input name="store" type="text" list="pt-stores" value="${esc(v.store)}" autocomplete="off"></label>
+        <label>Date de l'achat<input name="date" type="date" value="${esc(v.date)}" required></label>
+        ${stock ? `<label>Réserve après l'achat<input name="reserve" type="number" min="0" max="100" step="1" value="${esc(v.reserve)}"></label>` : ""}
+      </div>
+      <datalist id="pt-stores">${stores.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
+      ${stock ? `<p class="buy-n">Réserve : les bidons pleins d'avance, sans compter le bidon en service.</p>` : ""}
+      ${v.error ? `<p class="err">${esc(v.error)}</p>` : ""}
+      <div class="buy-a"><button type="button" class="ghost" data-act="buy-cancel">Annuler</button><button type="submit"${v.busy ? " disabled" : ""}>Noter l'achat</button></div>
+    </form>`;
+  }
+
+  /** Entité de la réserve, si c'est un input_number (le formulaire la met à jour). */
+  _stockEntity() {
+    const s = this._config.stock;
+    return typeof s === "string" && s.startsWith("input_number.") && this._hass?.states?.[s] ? s : null;
+  }
+
+  /** Clics et saisie, branchés une seule fois (le contenu de la carte est redessiné). */
+  _wire() {
+    this._wired = true;
+    const root = this.shadowRoot;
+    root.addEventListener("click", (ev) => {
+      const act = ev.target.closest?.("[data-act]")?.dataset.act;
+      if (act === "buy") {
+        if (this._buy) this._buy = null;
+        else {
+          const today = new Date(), pad = (n) => String(n).padStart(2, "0");
+          const stock = Math.max(0, Math.round(this._stock || 0));
+          const last = (this._purchases || []).slice().sort((a, b) => b.date - a.date)[0];
+          this._buy = {
+            qty: 1, price: this._lastPrice ? String(this._lastPrice).replace(".", ",") : "", store: last?.store || "",
+            date: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
+            stock, reserve: stock + 1, reserveTouched: false,
+          };
+        }
+        this._render(true);
+      } else if (act === "buy-cancel") {
+        this._buy = null;
+        this._render(true);
+      }
+    });
+    root.addEventListener("input", (ev) => {
+      const f = ev.target.closest?.("form.buy");
+      if (!f || !this._buy) return;
+      const v = this._buy, name = ev.target.name;
+      v[name] = ev.target.value;
+      if (name === "reserve") v.reserveTouched = true;
+      if (name === "qty" && !v.reserveTouched) {
+        v.reserve = v.stock + Math.max(0, Math.round(Number(ev.target.value)) || 0);
+        const r = f.querySelector("input[name=reserve]");
+        if (r) r.value = v.reserve;
+      }
+    });
+    root.addEventListener("submit", (ev) => {
+      if (!ev.target.closest?.("form.buy")) return;
+      ev.preventDefault();
+      this._saveBuy();
+    });
+  }
+
+  async _saveBuy() {
+    const v = this._buy, c = this._config, hass = this._hass;
+    if (!v || v.busy) return;
+    const qty = Math.round(Number(v.qty));
+    const price = PETROLE.num(v.price);
+    const store = String(v.store || "").replace(/·/g, "-").trim();
+    if (!(qty >= 1) || !(price > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(String(v.date))) {
+      v.error = "Indiquez le nombre de bidons, le prix d'un bidon et la date.";
+      this._render(true);
+      return;
+    }
+    v.busy = true; v.error = ""; this._render(true);
+    try {
+      // achat d'aujourd'hui : à l'heure actuelle ; achat d'un autre jour : à midi
+      const pad = (n) => String(n).padStart(2, "0");
+      const txt = (x) => `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())} ${pad(x.getHours())}:${pad(x.getMinutes())}:${pad(x.getSeconds())}`;
+      const now = new Date();
+      const start = txt(now).startsWith(v.date) ? now : new Date(`${v.date}T12:00:00`);
+      await hass.callService("calendar", "create_event", {
+        entity_id: c.calendar, summary: c.purchase_summary || PETROLE_DEFAULTS.purchase_summary,
+        description: `${qty} × ${price} €${store ? ` · ${store}` : ""}`,
+        start_date_time: txt(start), end_date_time: txt(new Date(start.getTime() + 60000)),
+      });
+      const stock = this._stockEntity();
+      if (stock && v.reserve !== "" && Number.isFinite(Number(v.reserve))) {
+        await hass.callService("input_number", "set_value", { entity_id: stock, value: Math.max(0, Math.round(Number(v.reserve))) });
+      }
+      // prix du dernier achat : celui que l'automatisation note au prochain bip (la carte reprend celui de l'achat)
+      if (typeof c.price === "string" && c.price.startsWith("input_number.") && hass.states?.[c.price]) {
+        await hass.callService("input_number", "set_value", { entity_id: c.price, value: price });
+      }
+      this._buy = null;
+      this._key = null;
+      this._fetched = 0;
+      this._loadCalendar();
+    } catch (err) {
+      v.busy = false;
+      v.error = `Achat non noté : ${err?.message || err}`;
+    }
+    this._render(true);
   }
 
   _footer(m) {
@@ -364,8 +545,26 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .rows-h { font-size: .82rem; color: var(--med-muted); margin: 0 4px 2px; }
 .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; border: 1px solid var(--med-line);
   border-radius: 10px; font-size: .85rem; margin-top: 6px; }
-.row span { color: var(--med-muted); }
+.row span { color: var(--med-muted); min-width: 0; }
+.row b { white-space: nowrap; flex: none; }
 .row b.now { color: var(--pt-main); }
+.buy-btn { all: unset; cursor: pointer; padding: 6px 12px; border-radius: 999px; font-size: .8rem; font-weight: 600;
+  border: 1px solid var(--med-line); background: var(--med-surface); color: var(--med-text); }
+.buy-btn.on, .buy-btn:hover { border-color: var(--pt-main); }
+.buy-btn:focus-visible { outline: 2px solid var(--pt-main); }
+.buy { margin: 0 12px 8px; padding: 12px; border-radius: 14px; border: 1px solid var(--pt-main); background: var(--med-surface); }
+.buy-g { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 10px; }
+@container (min-width: 620px) { .buy-g { grid-template-columns: repeat(5, 1fr); } }
+.buy label { display: flex; flex-direction: column; gap: 4px; font-size: .75rem; color: var(--med-muted); min-width: 0; }
+.buy input { font: inherit; font-size: .9rem; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--med-line);
+  background: var(--med-bg); color: var(--med-text); min-width: 0; width: 100%; box-sizing: border-box; }
+.buy-n { margin: 8px 0 0; font-size: .72rem; color: var(--med-muted); }
+.buy-a { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.buy-a button { font: inherit; font-size: .85rem; font-weight: 600; padding: 7px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--pt-main); background: var(--pt-main); color: #10301a; }
+.buy-a button.ghost { background: transparent; color: var(--med-text); border-color: var(--med-line); }
+.buy-a button[disabled] { opacity: .5; cursor: default; }
+.rows-n { font-size: .72rem; color: var(--med-muted); margin: 6px 4px 0; }
 .err { margin-top: 8px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--t-red); font-size: .8rem; color: var(--med-text); }
 footer { padding: 10px 18px 14px; font-size: .7rem; color: var(--med-muted); }
 .empty { padding: 4px 18px 18px; display: flex; flex-direction: column; gap: 6px; font-size: .9rem; }
@@ -414,6 +613,7 @@ const SCHEMA = [
   { name: "average_over", selector: { number: { min: 1, max: 20, step: 1, mode: "box" } } },
   { name: "season_start", selector: { select: { mode: "dropdown", options: MONTHS.map((m, i) => ({ value: i + 1, label: m })) } } },
   { name: "history", selector: { number: { min: 1, max: 20, step: 1, mode: "box" } } },
+  { name: "purchases", selector: { number: { min: 1, max: 20, step: 1, mode: "box" } } },
   { name: "warn_days", selector: { number: { min: 0, max: 30, step: 1, mode: "box", unit_of_measurement: "jours" } } },
   THEME_SELECT,
   { name: "font_size", selector: { number: { min: 70, max: 150, step: 5, mode: "slider", unit_of_measurement: "%" } } },
@@ -425,6 +625,7 @@ const LABELS = {
   average_over: "Durée moyenne calculée sur les derniers bidons",
   season_start: "Début de la saison de chauffe",
   history: "Derniers bidons affichés",
+  purchases: "Derniers achats affichés",
   warn_days: "Alerte « bientôt vide » quand il reste moins de",
   theme: "Couleurs de la carte",
   font_size: "Taille du texte",
