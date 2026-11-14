@@ -36,7 +36,7 @@ consommation, coût, réserve de bidons et dépense de la saison de chauffe.
 dans le calendrier avec sa contenance et son prix, un bidon est retiré de la réserve, et la carte
 fait le reste.
 
-> **Pré-version 0.1.0-beta.2** : les retours sont les bienvenus dans les
+> **Pré-version 0.1.0-beta.3** : les retours sont les bienvenus dans les
 > [issues GitHub](https://github.com/Marlboro62/petrole-card/issues).
 
 ![Carte Pétrole, données simulées](images/carte-demo.png)
