@@ -12,7 +12,7 @@
  * calendar: calendar.home
  */
 
-const CARD_VERSION = "0.1.0-beta.1";
+const CARD_VERSION = "0.1.0-beta.2";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -434,7 +434,7 @@ const INSTALL_DEFAULTS = { tags: "Bidon pétrole", capacity: 20, price: 0, notif
 const INSTALL = {
   normalize(install) {
     const i = { ...INSTALL_DEFAULTS, ...(install || {}) };
-    const tags = String(i.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
+    const tags = (Array.isArray(i.tags) ? i.tags : String(i.tags || "").split(",")).map((t) => String(t).trim()).filter(Boolean);
     return {
       tags: tags.length ? tags : [INSTALL_DEFAULTS.tags],
       capacity: Math.max(1, PETROLE.num(i.capacity) || 20),
@@ -516,7 +516,7 @@ const INSTALL = {
     const vars = Object.assign({}, ...(auto?.actions || auto?.action || []).filter((a) => a.variables).map((a) => a.variables));
     const m = /else '([^']*)'\s*\}\}$/.exec(String(vars.phone || ""));
     return {
-      tags: tags.join(", "),
+      tags,
       capacity: PETROLE.num(vars.litres) ?? INSTALL_DEFAULTS.capacity,
       notify: m && m[1].startsWith("notify.") ? m[1].slice(7) : "",
       stock: String(vars.reserve ?? "").includes("petrole_bidons_en_reserve"),
@@ -526,7 +526,7 @@ const INSTALL = {
   /** Crée ou met à jour le tout ; log(texte) décrit chaque étape. Les entrées existantes gardent leur valeur,
    *  sauf le prix du bidon, mis au prix saisi s'il est renseigné. */
   async run(hass, config, log) {
-    const o = INSTALL.normalize(config.install);
+    const o = INSTALL.normalize(config.install?.tags ? config.install : { ...(config.install || {}), tags: TAGS.suggest(hass) });
     if (!hass.user?.is_admin) throw new Error("il faut un compte administrateur de Home Assistant");
     const calendar = config.calendar || PETROLE_DEFAULTS.calendar;
     if (!hass.states[calendar]) throw new Error(`le calendrier ${calendar} n'existe pas : choisissez-en un dans les options de la carte`);
@@ -550,15 +550,32 @@ const INSTALL = {
   },
 };
 
-const INSTALL_SCHEMA = (phones) => [
-  { name: "tags", selector: { text: {} } },
+/** Tags connus de Home Assistant (Paramètres › Tags) : l'automatisation se déclenche sur leur ID. */
+const TAGS = {
+  list(hass) {
+    return Object.values(hass?.states || {}).filter((s) => s.entity_id?.startsWith("tag.") && s.attributes?.tag_id)
+      .map((s) => ({ id: String(s.attributes.tag_id), name: String(s.attributes.friendly_name || s.attributes.tag_id) }))
+      .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+  },
+  /** Tag proposé quand rien n'est choisi : celui dont l'ID ou le nom parle de pétrole, sinon « Bidon pétrole ». */
+  suggest(hass) {
+    const t = TAGS.list(hass).find((x) => /p[ée]trole|bidon|po[êe]le/i.test(`${x.id} ${x.name}`));
+    return [t ? t.id : INSTALL_DEFAULTS.tags];
+  },
+};
+
+const INSTALL_SCHEMA = (phones, tags) => [
+  {
+    name: "tags",
+    selector: { select: { multiple: true, custom_value: true, mode: "dropdown", options: tags.map((t) => ({ value: t.id, label: t.name === t.id ? t.id : `${t.name} (ID : ${t.id})` })) } },
+  },
   { name: "capacity", selector: { number: { min: 1, max: 100, step: 1, mode: "box", unit_of_measurement: "L" } } },
   { name: "price", selector: { number: { min: 0, max: 500, step: 0.01, mode: "box", unit_of_measurement: "€" } } },
   { name: "stock", selector: { boolean: {} } },
   { name: "notify", selector: { select: { mode: "dropdown", options: [{ value: "", label: "Aucun" }, ...phones.map((p) => ({ value: p, label: p.replace(/^mobile_app_/, "") }))] } } },
 ];
 const INSTALL_LABELS = {
-  tags: "Tag NFC du poêle (plusieurs : séparés par des virgules)",
+  tags: "Tag NFC du poêle (choisi dans Paramètres › Tags, ou ID tapé à la main)",
   capacity: "Contenance d'un bidon",
   price: "Prix d'un bidon (modifiable ensuite dans l'entrée « Pétrole prix du bidon »)",
   stock: "Suivre la réserve de bidons (un bidon retiré à chaque bip)",
@@ -576,6 +593,7 @@ const INSTALL_STYLE = `<style>
 .pt-log { margin: 10px 0 0; padding: 0; list-style: none; font-size: .9rem; }
 .pt-log li { margin: 4px 0; }
 .pt-log .err { color: var(--error-color, #db4437); }
+.pt-inst p.pt-warn { color: var(--warning-color, #ffa600); margin: 8px 0 0; }
 </style>`;
 
 /** Éditeur de la carte, avec en dessous l'installation du tag NFC. */
@@ -641,6 +659,7 @@ class PetroleCardEditor extends HTMLElement {
         à chaque bidon entamé, on bipe le tag du poêle et le bidon est noté dans le calendrier de la carte.
         Le tag s'écrit avec l'application compagnon (Paramètres › Tags). À relancer après un changement : les bidons déjà notés sont gardés.</p>
         <div class="pt-form"></div>
+        <p class="pt-warn" hidden></p>
         <div class="pt-row"><button type="button" class="pt-go">Installer ou mettre à jour</button></div>
         <ul class="pt-log"></ul>`;
       this._instForm = document.createElement("ha-form");
@@ -655,8 +674,16 @@ class PetroleCardEditor extends HTMLElement {
     }
     const phones = Object.keys(this._hass.services?.notify || {}).filter((s) => s.startsWith("mobile_app_")).sort();
     this._instForm.hass = this._hass;
-    this._instForm.schema = INSTALL_SCHEMA(phones);
-    this._instForm.data = { ...INSTALL_DEFAULTS, ...(this._config.install || {}) };
+    const known = TAGS.list(this._hass);
+    this._instForm.schema = INSTALL_SCHEMA(phones, known);
+    const inst = this._config.install || {};
+    const chosen = INSTALL.normalize(inst.tags ? inst : { tags: TAGS.suggest(this._hass) }).tags;
+    this._instForm.data = { ...INSTALL_DEFAULTS, ...inst, tags: chosen };
+    // un ID absent de Home Assistant : le bip ne déclencherait rien
+    const unknown = chosen.filter((t) => !known.some((k) => k.id === t));
+    const warn = this._inst.querySelector(".pt-warn");
+    warn.hidden = !unknown.length || !known.length;
+    warn.textContent = unknown.length ? `⚠ Tag inconnu de Home Assistant : ${unknown.join(", ")}. Choisissez le tag du poêle dans la liste, ou écrivez-le d'abord (Paramètres › Tags).` : "";
     const go = this._inst.querySelector(".pt-go");
     const admin = !!this._hass.user?.is_admin;
     go.disabled = !admin || this._busy;
