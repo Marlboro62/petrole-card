@@ -36,7 +36,7 @@ consommation, coût, réserve de bidons et dépense de la saison de chauffe.
 dans le calendrier avec sa contenance et son prix, un bidon est retiré de la réserve, et la carte
 fait le reste.
 
-> **Pré-version 0.1.0-beta.1** : les retours sont les bienvenus dans les
+> **Pré-version 0.1.0-beta.2** : les retours sont les bienvenus dans les
 > [issues GitHub](https://github.com/Marlboro62/petrole-card/issues).
 
 ![Carte Pétrole, données simulées](images/carte-demo.png)
@@ -68,7 +68,8 @@ Sans fichier à copier ni redémarrage, avec un compte administrateur :
    Calendrier local**) ou gardez le vôtre.
 2. Ajoutez la carte à un tableau de bord et ouvrez son éditeur. Choisissez le calendrier.
 3. Sous les options de la carte, dans **Installation du tag NFC**, renseignez :
-   - le **nom du tag** (`Bidon pétrole` par défaut) ;
+   - le **tag du poêle**, choisi dans la liste de vos tags (un tag dont le nom parle de pétrole est
+     proposé tout seul ; un ID inconnu de Home Assistant est signalé) ;
    - la **contenance** d'un bidon (20 L) et son **prix** ;
    - le **suivi de la réserve** de bidons (activé par défaut) ;
    - le **téléphone par défaut** (facultatif : c'est d'abord le téléphone qui a bipé qui est prévenu).
@@ -76,8 +77,9 @@ Sans fichier à copier ni redémarrage, avec un compte administrateur :
    - l'entrée `input_number.petrole_prix_du_bidon` (à changer quand le prix change) ;
    - l'entrée `input_number.petrole_bidons_en_reserve` (à remonter quand vous achetez des bidons) ;
    - l'automatisation **« Bidon de pétrole entamé (tag NFC) »**.
-5. Écrivez le tag avec l'application compagnon (**Paramètres › Tags › Ajouter un tag**), avec le
-   même nom, et collez-le sur le poêle ou sur l'étagère des bidons.
+5. Si le tag n'existe pas encore, écrivez-le avec l'application compagnon (**Paramètres › Tags ›
+   Ajouter un tag**), collez-le sur le poêle ou sur l'étagère des bidons, puis relancez l'installation
+   en le choisissant dans la liste. L'automatisation se déclenche sur l'**ID** du tag.
 
 Relancer l'installation ne perd rien : les bidons déjà notés restent dans le calendrier, et la
 réserve garde sa valeur. Un second bip dans les 10 minutes est ignoré (double lecture du tag).
