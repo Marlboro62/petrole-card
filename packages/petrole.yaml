@@ -1,0 +1,85 @@
+# Pétrole : un bidon de combustible liquide noté à chaque bip du tag NFC du poêle,
+# pour la carte custom:petrole-card.
+#
+# Le plus simple est l'installation depuis l'éditeur de la carte (bouton « Installer ou mettre à jour »).
+# Ce package fait la même chose en YAML, sans compte administrateur dans l'interface.
+#
+# Installation :
+#   1. configuration.yaml doit charger les packages :
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   2. copier ce fichier dans /config/packages/petrole.yaml
+#   3. adapter les éléments marqués « À ADAPTER » :
+#        - le tag « Bidon pétrole » (écrit avec l'application compagnon, Paramètres › Tags)
+#        - calendar.home : votre calendrier (intégration « Calendrier local »)
+#        - notify.mobile_app_mon_telephone : le téléphone prévenu quand on ne sait pas lequel a bipé
+#        - litres : la contenance de vos bidons
+#   4. Outils › YAML › Vérifier la configuration, puis redémarrer
+#   5. ajouter la carte :
+#        type: custom:petrole-card
+#        calendar: calendar.home
+
+input_number:
+  petrole_prix_du_bidon:
+    name: Pétrole prix du bidon
+    min: 0
+    max: 500
+    step: 0.01
+    mode: box
+    unit_of_measurement: "€"
+    icon: mdi:cash
+  petrole_bidons_en_reserve:
+    name: Pétrole bidons en réserve
+    min: 0
+    max: 100
+    step: 1
+    mode: box
+    unit_of_measurement: bidons
+    icon: mdi:storage-tank-outline
+
+automation:
+- id: petrole_bidon_tag_nfc
+  alias: Bidon de pétrole entamé (tag NFC)
+  description: "Bip du tag NFC du poêle à chaque bidon de pétrole entamé : note le bidon dans le calendrier (litres et prix), retire un bidon de la réserve et prévient le téléphone qui a bipé. Créée par la carte Pétrole."
+  mode: single
+  max_exceeded: silent
+  triggers:
+  - trigger: tag
+    tag_id: Bidon pétrole # À ADAPTER
+  conditions:
+  - condition: template
+    value_template: "{{ this.attributes.last_triggered is none or (now() - this.attributes.last_triggered).total_seconds() > 600 }}"
+  actions:
+  - variables:
+      phone: "{% set d = (trigger.event.data.device_id | default('')) if trigger.event is defined else '' %}{% set n = device_attr(d, 'name') if d else '' %}{{ ('notify.mobile_app_' ~ (n | slugify)) if n else 'notify.mobile_app_mon_telephone' }}" # À ADAPTER : téléphone par défaut
+      litres: 20 # À ADAPTER : contenance d'un bidon
+      prix: "{{ states('input_number.petrole_prix_du_bidon') | float(0) }}"
+      reserve: "{{ states('input_number.petrole_bidons_en_reserve') | int(-1) }}"
+  - action: calendar.create_event
+    target:
+      entity_id: calendar.home # À ADAPTER
+    data:
+      summary: Bidon pétrole
+      description: "{{ litres }} L{% if prix > 0 %} · {{ prix }} €{% endif %}"
+      start_date_time: "{{ now() }}"
+      end_date_time: "{{ now() + timedelta(minutes=1) }}"
+  - if:
+    - condition: template
+      value_template: "{{ reserve > 0 }}"
+    then:
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.petrole_bidons_en_reserve
+      data:
+        value: "{{ reserve - 1 }}"
+  - if:
+    - condition: template
+      value_template: "{{ phone != '' }}"
+    then:
+    - action: "{{ phone }}"
+      data:
+        title: Bidon de pétrole noté
+        message: "{{ litres }} L{% if prix > 0 %} à {{ ('%.2f' % prix) | replace('.', ',') }} €{% endif %}, noté le {{ now().strftime('%d/%m à %H:%M') }}.{% if reserve > 0 %} Réserve : {{ reserve - 1 }} bidon{{ 's' if reserve - 1 > 1 else '' }}{{ ' : pensez à en racheter.' if reserve - 1 <= 1 else '.' }}{% elif reserve == 0 %} Plus de bidon en réserve.{% endif %}"
+        data:
+          tag: petrole_bidon
+          notification_icon: mdi:storage-tank

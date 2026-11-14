@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pétrole · démo</title>
+<meta name="description" content="Démonstration de la carte Lovelace Pétrole avec des bidons simulés.">
+<style>
+  :root {
+    --bg: #0f1724; --panel: #172133; --line: #2a3850; --text: #e7edf5; --muted: #8fa0b8;
+    --accent: #4cc36b; --accent2: #1d93e3; --btn: #1e2a3f; --btn-on: #2b3d5c;
+    --card-background-color: #1c1c1c; --primary-text-color: #e1e1e1;
+    --secondary-text-color: #9b9b9b; --divider-color: rgba(225, 225, 225, .12);
+    --ha-card-border-radius: 12px;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --bg: #eef2f7; --panel: #ffffff; --line: #d6dde8; --text: #1b2433; --muted: #5b6b82;
+    --accent: #23944a; --accent2: #1673b8; --btn: #f2f5f9; --btn-on: #dde7f5;
+    --card-background-color: #ffffff; --primary-text-color: #212121;
+    --secondary-text-color: #727272; --divider-color: rgba(0, 0, 0, .12);
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent2); }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 16px 48px; }
+  .top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+  h1 { font-size: 1.5rem; margin: 0; line-height: 1.2; }
+  .lead { margin: 2px 0 0; color: var(--muted); }
+  .links { margin-left: auto; display: flex; gap: 14px; font-size: .9rem; }
+  .grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } .links { margin-left: 0; } .stage { order: -1; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+  .panel h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .panel h2:not(:first-child) { margin-top: 18px; }
+  .ctl { margin-bottom: 14px; }
+  .ctl-l { font-size: .85rem; margin-bottom: 6px; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button { font: inherit; font-size: .82rem; padding: 5px 11px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--btn); color: var(--text); }
+  .seg button[aria-pressed="true"] { background: var(--btn-on); border-color: var(--accent2); font-weight: 600; }
+  .seg button:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+  .stage { min-width: 0; }
+  .frame { margin: 0 auto; width: 100%; transition: max-width .25s ease; }
+  .frame.phone { max-width: 400px; }
+  .frame.pc { max-width: 640px; }
+  petrole-card, ha-card { display: block; }
+  pre { background: var(--btn); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+    font-size: .8rem; overflow-x: auto; margin: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Pétrole</h1>
+      <p class="lead">Démo de la carte avec des bidons simulés (valeurs fictives).</p>
+    </div>
+    <nav class="links">
+      <a href="https://github.com/Marlboro62/petrole-card">Dépôt GitHub</a>
+      <a href="https://github.com/Marlboro62/petrole-card#installation">Installer</a>
+    </nav>
+  </header>
+
+  <div class="grid">
+    <aside class="panel">
+      <h2>Bidons</h2>
+      <div class="ctl"><div class="seg" data-ctl="scenario">
+        <button data-v="winter" aria-pressed="true">Plein hiver</button>
+        <button data-v="low">Bientôt vide</button>
+        <button data-v="first">Premier bidon</button>
+        <button data-v="empty">Aucun bidon</button>
+      </div></div>
+      <div class="ctl"><div class="ctl-l">Réserve de bidons</div><div class="seg" data-ctl="stock">
+        <button data-v="3" aria-pressed="true">3</button>
+        <button data-v="1">1</button>
+        <button data-v="0">0</button>
+        <button data-v="">Non suivie</button>
+      </div></div>
+      <h2>Carte</h2>
+      <div class="ctl"><div class="ctl-l">Couleurs</div><div class="seg" data-ctl="theme">
+        <button data-v="v2" aria-pressed="true">Bleu nuit</button>
+        <button data-v="auto">Auto</button>
+        <button data-v="ha">Thème Home Assistant</button>
+      </div></div>
+      <div class="ctl"><div class="ctl-l">Home Assistant</div><div class="seg" data-ctl="mode">
+        <button data-v="dark" aria-pressed="true">Sombre</button>
+        <button data-v="light">Clair</button>
+      </div></div>
+      <div class="ctl"><div class="ctl-l">Écran</div><div class="seg" data-ctl="screen">
+        <button data-v="phone" aria-pressed="true">Téléphone</button>
+        <button data-v="pc">PC</button>
+      </div></div>
+      <h2>YAML de la carte</h2>
+      <pre id="yaml"></pre>
+    </aside>
+    <main class="stage"><div class="frame phone" id="frame"></div></main>
+  </div>
+</div>
+
+<script src="../petrole-card.js"></script>
+<script>
+  // Bidons fictifs : « Bidon pétrole » avec la description qu'écrit l'automatisation du tag NFC
+  const JOUR = 86400000;
+  const ev = (daysAgo, price) => ({
+    summary: "Bidon pétrole",
+    description: `20 L · ${price} €`,
+    start: { dateTime: new Date(Date.now() - daysAgo * JOUR).toISOString() },
+  });
+  // durées de bidon qui raccourcissent avec le froid (du plus ancien au plus récent)
+  const chain = (durations, current, prices) => {
+    const out = []; let d = current;
+    out.push(ev(d, prices[0]));
+    durations.forEach((n, i) => { d += n; out.push(ev(d, prices[Math.min(i + 1, prices.length - 1)])); });
+    return out;
+  };
+  const SCENARIOS = {
+    winter: () => chain([7.5, 8, 9, 11, 14, 18], 3.2, [32.9, 32.9, 31.5, 31.5]),
+    low: () => chain([7, 7.5, 8, 8.5], 7.1, [32.9]),
+    first: () => [ev(2.4, 32.9)],
+    empty: () => [],
+  };
+
+  const state = { scenario: "winter", stock: "3", theme: "v2", mode: "dark", screen: "phone" };
+  const frame = document.getElementById("frame");
+  let card;
+
+  function render() {
+    document.documentElement.dataset.theme = state.mode;
+    frame.className = `frame ${state.screen}`;
+    const config = { calendar: "calendar.home", label: "PTX 2000 · 20 L", theme: state.theme, ...(state.stock === "" ? { stock: "" } : {}) };
+    document.getElementById("yaml").textContent = ["type: custom:petrole-card", ...Object.entries(config).map(([k, v]) => `${k}: ${v === "" ? '""' : v}`)].join("\n");
+    const events = SCENARIOS[state.scenario]();
+    card?.remove();
+    card = document.createElement("petrole-card");
+    frame.appendChild(card);
+    card.setConfig(config);
+    card.hass = {
+      themes: { darkMode: state.mode === "dark" },
+      states: {
+        "calendar.home": { entity_id: "calendar.home", state: "off", attributes: { friendly_name: "Maison" } },
+        "input_number.petrole_prix_du_bidon": { entity_id: "input_number.petrole_prix_du_bidon", state: "32.9", attributes: {} },
+        ...(state.stock === "" ? {} : { "input_number.petrole_bidons_en_reserve": { entity_id: "input_number.petrole_bidons_en_reserve", state: state.stock, attributes: {} } }),
+      },
+      callApi: async () => events,
+    };
+  }
+
+  document.querySelectorAll(".seg").forEach((seg) => seg.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    seg.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    state[seg.dataset.ctl] = b.dataset.v;
+    render();
+  }));
+  render();
+</script>
+</body>
+</html>
