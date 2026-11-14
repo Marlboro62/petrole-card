@@ -12,7 +12,7 @@
  * calendar: calendar.home
  */
 
-const CARD_VERSION = "0.1.0-beta.2";
+const CARD_VERSION = "0.1.0-beta.3";
 
 /* ------------------------------------------------------------- affichage */
 
@@ -36,6 +36,13 @@ const plural = (n, one, many) => `${fmt(n, 0)} ${Math.round(n) > 1 ? many : one}
 /** Nombre de jours lisible : une décimale sous 10 jours, « jour » au singulier sous 2. */
 const daysNum = (n) => fmt(n, n < 10 ? 1 : 0);
 const daysUnit = (n) => (n < 2 ? "jour" : "jours");
+/** Durée d'un bidon : en heures le premier jour (« moins d'1 h », « 5 h »), en jours ensuite. */
+const span = (days) => {
+  const d = Math.max(0, days);
+  if (d >= 1) return { v: daysNum(d), u: daysUnit(d) };
+  const h = d * 24;
+  return h < 1 ? { v: "< 1", u: "h" } : { v: fmt(h, 0), u: "h" };
+};
 
 /** Classe de thème : v2 (bleu nuit), auto (bleu nuit, ou clair si Home Assistant est en mode clair), ha (thème Home Assistant). */
 const themeClass = (theme, hass) => {
@@ -102,7 +109,7 @@ const PETROLE = {
         litres: b.litres ?? capacity,
         price: b.price ?? price,
         end,
-        days: ((end || now) - b.start) / DAY,
+        days: Math.max(0, ((end || now) - b.start) / DAY),
         current: !end,
       };
     }).reverse();
@@ -259,7 +266,7 @@ class PetroleCard extends HTMLElement {
     return `<section class="hero">
       <div>
         <div class="hero-l">Bidon en service depuis</div>
-        <div class="hero-v">${daysNum(m.days)}<span>${daysUnit(m.days)}</span></div>
+        <div class="hero-v">${span(m.days).v}<span>${span(m.days).u}</span></div>
         ${m.avg ? (m.days > m.avg
           ? `<div class="evo up">au-delà de la moyenne (${fmt(m.avg, 1)} jours)</div>`
           : `<div class="hero-p">moyenne : ${fmt(m.avg, 1)} jours par bidon</div>`) : ""}
@@ -301,7 +308,7 @@ class PetroleCard extends HTMLElement {
     const n = Math.max(1, Number(this._config.history) || 5);
     const rows = m.bidons.slice(0, n).map((b) => `<div class="row">
       <span>${esc(dateFr(b.start))} → ${b.current ? "en service" : esc(dateFr(b.end))}${b.price !== null ? ` · ${euro(b.price)}` : ""}</span>
-      <b class="${b.current ? "now" : ""}">${fmt(b.days, b.days < 10 ? 1 : 0)} j</b></div>`).join("");
+      <b class="${b.current ? "now" : ""}">${b.days < 1 ? `${span(b.days).v} h` : `${fmt(b.days, b.days < 10 ? 1 : 0)} j`}</b></div>`).join("");
     return `<section class="rows"><div class="rows-h">Derniers bidons</div>${rows}${this._calError ? `<div class="err">Calendrier illisible : ${esc(this._calError)}</div>` : ""}</section>`;
   }
 
