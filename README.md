@@ -53,13 +53,15 @@ entamé reprend le prix et le magasin de son achat, les plus anciens d'abord.
 
 ## Installation de la carte
 
+La carte fait partie du catalogue par défaut de HACS : aucun dépôt à ajouter.
+
 [![Ouvrir dans Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Marlboro62&repository=petrole-card&category=plugin)
 
 1. Ouvrez **Paramètres › Marketplace** (ou HACS avant la 2026.11), ou utilisez le bouton
    ci-dessus.
 2. Cherchez **Pétrole**, installez-la, puis rechargez la page (Ctrl+F5).
 
-Si la carte n'apparaît pas dans la recherche, ajoutez-la comme dépôt personnalisé : menu **⋮ ›
+Si la carte n'apparaît pas encore dans la recherche, ajoutez-la comme dépôt personnalisé : menu **⋮ ›
 Dépôts personnalisés**, adresse `https://github.com/Marlboro62/petrole-card`, type
 **Tableau de bord**, puis reprenez l'étape 2.
 
