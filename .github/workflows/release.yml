@@ -53,7 +53,8 @@ jobs:
 
   release:
     name: Publication de la release
-    needs: controle
+    # la release n'est publiée qu'après la validation HACS (exigence du catalogue par défaut)
+    needs: [controle, hacs]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     env:
